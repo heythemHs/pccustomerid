@@ -46,7 +46,8 @@
         if (!idCountry) {
             return false;
         }
-        if (config.countryCH && idCountry === config.countryCH) {
+        var countries = config.countries || [];
+        if (countries.indexOf(idCountry) !== -1) {
             return true;
         }
         if (config.countryES && idCountry === config.countryES) {
