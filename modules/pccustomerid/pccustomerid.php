@@ -536,6 +536,10 @@ class Pccustomerid extends Module
             ],
         ]);
 
-        return $this->display($this->name, 'configure.tpl');
+        // Module::display() only resolves templates under views/templates/{hook,front}/
+        // (or the module root) - it never looks in views/templates/admin/, which is why
+        // it reported "No template found for module" for the BO configuration page.
+        // Admin templates must be fetched directly instead.
+        return $this->context->smarty->fetch($this->local_path . 'views/templates/admin/configure.tpl');
     }
 }
