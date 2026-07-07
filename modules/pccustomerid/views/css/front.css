@@ -1,0 +1,21 @@
+.pc-customer-id-help {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.875rem;
+  line-height: 1.35;
+  opacity: 0.85;
+}
+
+.pc-customer-id-required-mark {
+  color: #d00;
+}
+
+.form-group.pc-customer-id-field-hidden {
+  display: none;
+}
+
+/* Progressive enhancement: hide the field before front.js runs, on browsers
+   that support :has(). front.js remains the authoritative toggle either way. */
+.form-group:has(> label[for="field-dni"]):not(.pc-customer-id-visible) {
+  display: none;
+}

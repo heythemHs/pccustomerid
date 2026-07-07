@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:1.2" version="1.2">
+  <file source-language="en" datatype="plaintext" original="Modules.Pccustomerid.Shop">
+    <body>
+      <trans-unit id="1" resname="ID number">
+        <source>ID number</source>
+        <target><![CDATA[Número de identificación]]></target>
+      </trans-unit>
+      <trans-unit id="2" resname="DNI or equivalent">
+        <source>DNI or equivalent</source>
+        <target><![CDATA[DNI o equivalente]]></target>
+      </trans-unit>
+      <trans-unit id="3" resname="ID number is required for this shipping destination.">
+        <source>ID number is required for this shipping destination.</source>
+        <target><![CDATA[El número de identificación es obligatorio para este destino de envío.]]></target>
+      </trans-unit>
+      <trans-unit id="4" resname="In many cases, customs authorities may request an ID number (DNI or equivalent) to process or release the shipment. If this information is missing, the shipment may be held or delayed by customs.">
+        <source>In many cases, customs authorities may request an ID number (DNI or equivalent) to process or release the shipment. If this information is missing, the shipment may be held or delayed by customs.</source>
+        <target><![CDATA[En muchos casos, las autoridades aduaneras pueden solicitar un número de identificación (DNI o equivalente) para procesar o liberar el envío. Si esta información falta, el envío puede quedar retenido o sufrir retrasos en aduanas.]]></target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

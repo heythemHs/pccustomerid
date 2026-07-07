@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<module>
+  <name>pccustomerid</name>
+  <displayName><![CDATA[PC Customer ID for customers adress]]></displayName>
+  <version><![CDATA[1.0.0]]></version>
+  <description><![CDATA[Adds a conditional, country-specific ID number field (DNI or equivalent) to customer address forms for customs clearance (Switzerland, Canary Islands).]]></description>
+  <author><![CDATA[perpetualcode]]></author>
+  <tab><![CDATA[front_office_features]]></tab>
+  <is_configurable>1</is_configurable>
+  <need_instance>0</need_instance>
+  <limited_countries></limited_countries>
+</module>
