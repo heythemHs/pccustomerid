@@ -13,10 +13,8 @@ if (!defined('_PS_VERSION_')) {
 
 class Pccustomerid extends Module
 {
-    const CONFIG_ENABLED = 'PCCUSTOMERID_ENABLED';
-    const CONFIG_EXCLUDED_SHOP_IDS = 'PCCUSTOMERID_EXCLUDED_SHOP_IDS';
-    const CONFIG_CH_COUNTRY_ID = 'PCCUSTOMERID_CH_COUNTRY_ID';
-    const CONFIG_ES_COUNTRY_ID = 'PCCUSTOMERID_ES_COUNTRY_ID';
+    const CONFIG_ENABLED_SHOP_IDS = 'PCCUSTOMERID_ENABLED_SHOP_IDS';
+    const CONFIG_COUNTRIES = 'PCCUSTOMERID_COUNTRIES';
     const CONFIG_CANARY_STATE_IDS = 'PCCUSTOMERID_CANARY_STATE_IDS';
     const CONFIG_CANARY_POSTCODE_REGEX = 'PCCUSTOMERID_CANARY_POSTCODE_REGEX';
     const CONFIG_USE_DNI_FIELD = 'PCCUSTOMERID_USE_DNI_FIELD';
@@ -25,6 +23,7 @@ class Pccustomerid extends Module
     const FIELD_MAX_LENGTH = 16;
     const DEFAULT_CANARY_POSTCODE_REGEX = '^(35|38)\d{3}$';
     const DEFAULT_USA_SHOP_DOMAIN_NEEDLE = 'seedstockersusa.com';
+    const SHOP_TREE_ID = 'pccustomerid-shops-tree';
 
     /**
      * Kept in sync with Address::$definition['fields']['dni']['validate'] (Validate::isDniLite):
@@ -33,6 +32,13 @@ class Pccustomerid extends Module
      * with a fatal exception when the address is saved.
      */
     const DNI_VALUE_REGEX = '/^[0-9A-Za-z\-.]{1,16}$/';
+
+    /**
+     * Used as the HelperTreeShops "table" attribute (checkbox name prefix) and as
+     * $helper->table below. This module has no dedicated database table; the value only
+     * namespaces form field names, matching the convention used by other modules' BO forms.
+     */
+    public $table = 'pccustomerid';
 
     public function __construct()
     {
@@ -48,7 +54,7 @@ class Pccustomerid extends Module
 
         $this->displayName = $this->trans('PC Customer ID for customers adress', [], 'Modules.Pccustomerid.Admin');
         $this->description = $this->trans(
-            'Adds a conditional, country-specific ID number field (DNI or equivalent) to customer address forms for customs clearance (Switzerland, Canary Islands).',
+            'Adds a conditional, country-specific ID number field (DNI or equivalent) to customer address forms for customs clearance.',
             [],
             'Modules.Pccustomerid.Admin'
         );
@@ -233,8 +239,8 @@ class Pccustomerid extends Module
             'pcCustomerIdConfig' => [
                 'enabled' => true,
                 'fieldName' => self::FIELD_NAME,
-                'countryCH' => (int) $this->getConfigValue(self::CONFIG_CH_COUNTRY_ID),
-                'countryES' => (int) $this->getConfigValue(self::CONFIG_ES_COUNTRY_ID),
+                'countries' => $this->getConfiguredCountryIds(),
+                'countryES' => (int) Country::getByIso('ES'),
                 'canaryStateIds' => $this->getCanaryStateIds(),
                 'canaryPostcodeRegex' => (string) $this->getConfigValue(
                     self::CONFIG_CANARY_POSTCODE_REGEX,
@@ -254,6 +260,11 @@ class Pccustomerid extends Module
 
     /**
      * Central decision function: does this destination require the customer ID?
+     *
+     * Two independent rules, both configurable from the BO, and applicable to any
+     * PrestaShop store using this module (not specific to Switzerland/Spain):
+     *  - PCCUSTOMERID_COUNTRIES: countries where the ID is always required.
+     *  - the Canary Islands sub-region rule for Spain (province, with a postcode fallback).
      */
     private function requiresCustomerId(int $idCountry, int $idState = 0, string $postcode = ''): bool
     {
@@ -261,12 +272,11 @@ class Pccustomerid extends Module
             return false;
         }
 
-        $chCountryId = (int) $this->getConfigValue(self::CONFIG_CH_COUNTRY_ID);
-        if ($chCountryId && $idCountry === $chCountryId) {
+        if (in_array($idCountry, $this->getConfiguredCountryIds(), true)) {
             return true;
         }
 
-        $esCountryId = (int) $this->getConfigValue(self::CONFIG_ES_COUNTRY_ID);
+        $esCountryId = (int) Country::getByIso('ES');
         if ($esCountryId && $idCountry === $esCountryId) {
             if ($idState && in_array($idState, $this->getCanaryStateIds(), true)) {
                 return true;
@@ -316,31 +326,36 @@ class Pccustomerid extends Module
         return '';
     }
 
+    private function getConfiguredCountryIds(): array
+    {
+        return $this->csvToIntArray((string) $this->getConfigValue(self::CONFIG_COUNTRIES, ''));
+    }
+
     private function getCanaryStateIds(): array
     {
-        $csv = (string) $this->getConfigValue(self::CONFIG_CANARY_STATE_IDS, '');
-        $ids = array_filter(array_map('intval', explode(',', $csv)));
+        return $this->csvToIntArray((string) $this->getConfigValue(self::CONFIG_CANARY_STATE_IDS, ''));
+    }
 
-        return array_values($ids);
+    private function getEnabledShopIds(): array
+    {
+        return $this->csvToIntArray((string) $this->getConfigValue(self::CONFIG_ENABLED_SHOP_IDS, ''));
+    }
+
+    private function csvToIntArray(string $csv): array
+    {
+        return array_values(array_unique(array_filter(array_map('intval', explode(',', $csv)))));
     }
 
     private function isEnabledForCurrentShop(): bool
     {
-        $idShop = (int) $this->context->shop->id;
-
-        $excludedCsv = (string) $this->getConfigValue(self::CONFIG_EXCLUDED_SHOP_IDS, '');
-        $excluded = array_filter(array_map('intval', explode(',', $excludedCsv)));
-        if (in_array($idShop, $excluded, true)) {
-            return false;
-        }
-
-        return (bool) $this->getConfigValue(self::CONFIG_ENABLED, true);
+        return in_array((int) $this->context->shop->id, $this->getEnabledShopIds(), true);
     }
 
     /**
      * Thin wrapper: Configuration::get() already cascades shop -> shop group -> global
-     * using the current context when $idShop is left null, which is exactly the
-     * multistore behaviour we want everywhere at runtime.
+     * using the current context when $idShop is left null. All the settings below are
+     * saved globally (see postProcessConfiguration()), so in practice this always
+     * resolves to the single stored value - the cascade is simply harmless here.
      */
     private function getConfigValue(string $key, $default = false)
     {
@@ -350,10 +365,8 @@ class Pccustomerid extends Module
     private function getConfigKeys(): array
     {
         return [
-            self::CONFIG_ENABLED,
-            self::CONFIG_EXCLUDED_SHOP_IDS,
-            self::CONFIG_CH_COUNTRY_ID,
-            self::CONFIG_ES_COUNTRY_ID,
+            self::CONFIG_ENABLED_SHOP_IDS,
+            self::CONFIG_COUNTRIES,
             self::CONFIG_CANARY_STATE_IDS,
             self::CONFIG_CANARY_POSTCODE_REGEX,
             self::CONFIG_USE_DNI_FIELD,
@@ -362,19 +375,18 @@ class Pccustomerid extends Module
 
     private function installDefaultConfiguration(): bool
     {
-        Configuration::updateValue(self::CONFIG_ENABLED, 1);
-        Configuration::updateValue(self::CONFIG_CH_COUNTRY_ID, (int) Country::getByIso('CH'));
-        Configuration::updateValue(self::CONFIG_ES_COUNTRY_ID, (int) Country::getByIso('ES'));
+        $allShopIds = array_map(static function (array $shop): int {
+            return (int) $shop['id_shop'];
+        }, Shop::getShops(false));
+
+        $usaShopIds = $this->detectShopIdsByDomain(self::DEFAULT_USA_SHOP_DOMAIN_NEEDLE);
+        $enabledShopIds = array_values(array_diff($allShopIds, $usaShopIds));
+
+        Configuration::updateValue(self::CONFIG_ENABLED_SHOP_IDS, implode(',', $enabledShopIds));
+        Configuration::updateValue(self::CONFIG_COUNTRIES, (string) (int) Country::getByIso('CH'));
         Configuration::updateValue(self::CONFIG_CANARY_STATE_IDS, implode(',', $this->detectCanaryStateIds()));
         Configuration::updateValue(self::CONFIG_CANARY_POSTCODE_REGEX, self::DEFAULT_CANARY_POSTCODE_REGEX);
         Configuration::updateValue(self::CONFIG_USE_DNI_FIELD, 1);
-
-        $usaShopIds = $this->detectShopIdsByDomain(self::DEFAULT_USA_SHOP_DOMAIN_NEEDLE);
-        Configuration::updateValue(self::CONFIG_EXCLUDED_SHOP_IDS, implode(',', $usaShopIds));
-
-        foreach ($usaShopIds as $idShop) {
-            Configuration::updateValue(self::CONFIG_ENABLED, 0, false, null, (int) $idShop);
-        }
 
         return true;
     }
@@ -433,113 +445,206 @@ class Pccustomerid extends Module
 
     private function postProcessConfiguration(): void
     {
-        $idShopGroup = (Shop::getContext() === Shop::CONTEXT_GROUP) ? (int) Shop::getContextShopGroupID() : null;
-        $idShop = (Shop::getContext() === Shop::CONTEXT_SHOP) ? (int) Shop::getContextShopID() : null;
+        $enabledShopIds = array_map('intval', (array) Tools::getValue('checkBoxShopAsso_' . $this->name, []));
+        Configuration::updateValue(self::CONFIG_ENABLED_SHOP_IDS, implode(',', array_unique($enabledShopIds)));
 
-        Configuration::updateValue(
-            self::CONFIG_ENABLED,
-            Tools::getValue(self::CONFIG_ENABLED) ? 1 : 0,
-            false,
-            $idShopGroup,
-            $idShop
-        );
-        Configuration::updateValue(
-            self::CONFIG_EXCLUDED_SHOP_IDS,
-            $this->sanitizeCsvIntList(Tools::getValue(self::CONFIG_EXCLUDED_SHOP_IDS)),
-            false,
-            $idShopGroup,
-            $idShop
-        );
-        Configuration::updateValue(
-            self::CONFIG_CH_COUNTRY_ID,
-            (int) Tools::getValue(self::CONFIG_CH_COUNTRY_ID),
-            false,
-            $idShopGroup,
-            $idShop
-        );
-        Configuration::updateValue(
-            self::CONFIG_ES_COUNTRY_ID,
-            (int) Tools::getValue(self::CONFIG_ES_COUNTRY_ID),
-            false,
-            $idShopGroup,
-            $idShop
-        );
-        Configuration::updateValue(
-            self::CONFIG_CANARY_STATE_IDS,
-            $this->sanitizeCsvIntList(Tools::getValue(self::CONFIG_CANARY_STATE_IDS)),
-            false,
-            $idShopGroup,
-            $idShop
-        );
+        $countries = array_map('intval', (array) Tools::getValue(self::CONFIG_COUNTRIES, []));
+        Configuration::updateValue(self::CONFIG_COUNTRIES, implode(',', array_unique(array_filter($countries))));
+
+        $canaryStates = array_map('intval', (array) Tools::getValue(self::CONFIG_CANARY_STATE_IDS, []));
+        Configuration::updateValue(self::CONFIG_CANARY_STATE_IDS, implode(',', array_unique(array_filter($canaryStates))));
 
         $regex = (string) Tools::getValue(self::CONFIG_CANARY_POSTCODE_REGEX);
         if ($regex === '' || false === @preg_match('#' . $regex . '#', '')) {
             $regex = self::DEFAULT_CANARY_POSTCODE_REGEX;
         }
-        Configuration::updateValue(self::CONFIG_CANARY_POSTCODE_REGEX, $regex, false, $idShopGroup, $idShop);
+        Configuration::updateValue(self::CONFIG_CANARY_POSTCODE_REGEX, $regex);
 
-        Configuration::updateValue(
-            self::CONFIG_USE_DNI_FIELD,
-            Tools::getValue(self::CONFIG_USE_DNI_FIELD) ? 1 : 0,
-            false,
-            $idShopGroup,
-            $idShop
-        );
+        Configuration::updateValue(self::CONFIG_USE_DNI_FIELD, Tools::getValue(self::CONFIG_USE_DNI_FIELD) ? 1 : 0);
     }
 
     private function postProcessAutoDetect(): void
     {
-        $idShopGroup = (Shop::getContext() === Shop::CONTEXT_GROUP) ? (int) Shop::getContextShopGroupID() : null;
-        $idShop = (Shop::getContext() === Shop::CONTEXT_SHOP) ? (int) Shop::getContextShopID() : null;
-
-        Configuration::updateValue(self::CONFIG_CH_COUNTRY_ID, (int) Country::getByIso('CH'), false, $idShopGroup, $idShop);
-        Configuration::updateValue(self::CONFIG_ES_COUNTRY_ID, (int) Country::getByIso('ES'), false, $idShopGroup, $idShop);
-        Configuration::updateValue(
-            self::CONFIG_CANARY_STATE_IDS,
-            implode(',', $this->detectCanaryStateIds()),
-            false,
-            $idShopGroup,
-            $idShop
-        );
+        Configuration::updateValue(self::CONFIG_CANARY_STATE_IDS, implode(',', $this->detectCanaryStateIds()));
     }
 
-    private function sanitizeCsvIntList($raw): string
+    private function getActiveCountries(): array
     {
-        $ids = array_filter(array_map('intval', preg_split('/[,\s]+/', (string) $raw, -1, PREG_SPLIT_NO_EMPTY)));
+        return Country::getCountries((int) $this->context->language->id, true);
+    }
 
-        return implode(',', array_values(array_unique($ids)));
+    private function getSpainStates(): array
+    {
+        $idCountryEs = (int) Country::getByIso('ES');
+        if (!$idCountryEs) {
+            return [];
+        }
+
+        return State::getStatesByIdCountry($idCountryEs);
+    }
+
+    private function renderShopsTree(): string
+    {
+        $selected = array_combine($this->getEnabledShopIds(), $this->getEnabledShopIds());
+
+        $tree = new HelperTreeShops(self::SHOP_TREE_ID, $this->trans('Shops where the module is active', [], 'Modules.Pccustomerid.Admin'));
+        $tree->setSelectedShops($selected ?: []);
+        $tree->setAttribute('table', $this->name);
+
+        return $tree->render();
+    }
+
+    private function getConfigFieldsValues(): array
+    {
+        return [
+            self::CONFIG_COUNTRIES => $this->getConfiguredCountryIds(),
+            self::CONFIG_CANARY_STATE_IDS => $this->getCanaryStateIds(),
+            self::CONFIG_CANARY_POSTCODE_REGEX => (string) $this->getConfigValue(
+                self::CONFIG_CANARY_POSTCODE_REGEX,
+                self::DEFAULT_CANARY_POSTCODE_REGEX
+            ),
+            self::CONFIG_USE_DNI_FIELD => (int) $this->getConfigValue(self::CONFIG_USE_DNI_FIELD, true),
+        ];
+    }
+
+    private function getShopsFieldset(): array
+    {
+        return [
+            'form' => [
+                'legend' => [
+                    'title' => $this->trans('Shops', [], 'Modules.Pccustomerid.Admin'),
+                    'icon' => 'icon-shop',
+                ],
+                'input' => [
+                    [
+                        'type' => 'html',
+                        'name' => 'pccustomerid_shops_tree',
+                        'label' => $this->trans('Active in these shops', [], 'Modules.Pccustomerid.Admin'),
+                        'html_content' => $this->renderShopsTree(),
+                        'desc' => $this->trans(
+                            'Uncheck a shop to fully disable the module there (e.g. a USA shop that should not ask for a customs ID number).',
+                            [],
+                            'Modules.Pccustomerid.Admin'
+                        ),
+                    ],
+                ],
+                'submit' => [
+                    'title' => $this->trans('Save', [], 'Modules.Pccustomerid.Admin'),
+                ],
+            ],
+        ];
+    }
+
+    private function getGeneralFieldset(): array
+    {
+        return [
+            'form' => [
+                'legend' => [
+                    'title' => $this->trans('Destinations requiring the ID number', [], 'Modules.Pccustomerid.Admin'),
+                    'icon' => 'icon-globe',
+                ],
+                'input' => [
+                    [
+                        'type' => 'select',
+                        'name' => self::CONFIG_COUNTRIES,
+                        'label' => $this->trans('Countries', [], 'Modules.Pccustomerid.Admin'),
+                        'desc' => $this->trans(
+                            'The ID number is always required for addresses in these countries.',
+                            [],
+                            'Modules.Pccustomerid.Admin'
+                        ),
+                        'multiple' => true,
+                        'size' => 8,
+                        'options' => [
+                            'query' => $this->getActiveCountries(),
+                            'id' => 'id_country',
+                            'name' => 'name',
+                        ],
+                    ],
+                    [
+                        'type' => 'select',
+                        'name' => self::CONFIG_CANARY_STATE_IDS,
+                        'label' => $this->trans('Canary Islands provinces (Spain)', [], 'Modules.Pccustomerid.Admin'),
+                        'desc' => $this->trans(
+                            'In addition to the countries above, the ID number is required for Spanish addresses in these provinces (or matching the postcode fallback below).',
+                            [],
+                            'Modules.Pccustomerid.Admin'
+                        ),
+                        'multiple' => true,
+                        'size' => 4,
+                        'options' => [
+                            'query' => $this->getSpainStates(),
+                            'id' => 'id_state',
+                            'name' => 'name',
+                        ],
+                    ],
+                    [
+                        'type' => 'text',
+                        'name' => self::CONFIG_CANARY_POSTCODE_REGEX,
+                        'label' => $this->trans('Canary Islands postcode fallback (regex)', [], 'Modules.Pccustomerid.Admin'),
+                        'desc' => $this->trans(
+                            'Used when the province above cannot be matched, e.g. ^(35|38)\d{3}$',
+                            [],
+                            'Modules.Pccustomerid.Admin'
+                        ),
+                    ],
+                    [
+                        'type' => 'switch',
+                        'name' => self::CONFIG_USE_DNI_FIELD,
+                        'label' => $this->trans('Use native ps_address.dni field', [], 'Modules.Pccustomerid.Admin'),
+                        'desc' => $this->trans(
+                            'Informational: this module always stores the value in the native ps_address.dni column.',
+                            [],
+                            'Modules.Pccustomerid.Admin'
+                        ),
+                        'values' => [
+                            ['value' => 1, 'label' => $this->trans('Yes', [], 'Modules.Pccustomerid.Admin')],
+                            ['value' => 0, 'label' => $this->trans('No', [], 'Modules.Pccustomerid.Admin')],
+                        ],
+                    ],
+                ],
+                'submit' => [
+                    'title' => $this->trans('Save', [], 'Modules.Pccustomerid.Admin'),
+                ],
+                'buttons' => [
+                    'detect' => [
+                        'title' => $this->trans('Run auto-detection (Canary provinces)', [], 'Modules.Pccustomerid.Admin'),
+                        'name' => 'submitPccustomeridDetect',
+                        'type' => 'submit',
+                        'class' => 'btn btn-default pull-right',
+                        'icon' => 'process-icon-refresh',
+                    ],
+                ],
+            ],
+        ];
     }
 
     private function renderForm(): string
     {
-        $shopContextLabel = $this->trans('All shops', [], 'Modules.Pccustomerid.Admin');
-        if (Shop::getContext() === Shop::CONTEXT_GROUP) {
-            $shopContextLabel = $this->trans('Current shop group', [], 'Modules.Pccustomerid.Admin');
-        } elseif (Shop::getContext() === Shop::CONTEXT_SHOP) {
-            $shopContextLabel = $this->trans('Current shop only', [], 'Modules.Pccustomerid.Admin');
-        }
+        $helper = new HelperForm();
 
-        $this->context->smarty->assign([
-            'pc_action_url' => $this->context->link->getAdminLink('AdminModules') . '&configure=' . $this->name,
-            'pc_shop_context_label' => $shopContextLabel,
-            'pc_config' => [
-                'enabled' => (bool) $this->getConfigValue(self::CONFIG_ENABLED, true),
-                'excluded_shop_ids' => (string) $this->getConfigValue(self::CONFIG_EXCLUDED_SHOP_IDS, ''),
-                'ch_country_id' => (int) $this->getConfigValue(self::CONFIG_CH_COUNTRY_ID),
-                'es_country_id' => (int) $this->getConfigValue(self::CONFIG_ES_COUNTRY_ID),
-                'canary_state_ids' => (string) $this->getConfigValue(self::CONFIG_CANARY_STATE_IDS, ''),
-                'canary_postcode_regex' => (string) $this->getConfigValue(
-                    self::CONFIG_CANARY_POSTCODE_REGEX,
-                    self::DEFAULT_CANARY_POSTCODE_REGEX
-                ),
-                'use_dni_field' => (bool) $this->getConfigValue(self::CONFIG_USE_DNI_FIELD, true),
-            ],
+        $helper->show_toolbar = false;
+        $helper->table = $this->table;
+        $helper->module = $this;
+        $helper->default_form_language = $this->context->language->id;
+        $helper->allow_employee_form_lang = (int) Configuration::get('PS_BO_ALLOW_EMPLOYEE_FORM_LANG', 0);
+        $helper->identifier = 'id_module';
+        $helper->submit_action = 'submitPccustomerid';
+        $helper->currentIndex = $this->context->link->getAdminLink('AdminModules', false)
+            . '&configure=' . $this->name
+            . '&tab_module=' . $this->tab
+            . '&module_name=' . $this->name;
+        $helper->token = Tools::getAdminTokenLite('AdminModules');
+
+        $helper->tpl_vars = [
+            'fields_value' => $this->getConfigFieldsValues(),
+            'languages' => $this->context->controller->getLanguages(),
+            'id_language' => $this->context->language->id,
+        ];
+
+        return $helper->generateForm([
+            $this->getShopsFieldset(),
+            $this->getGeneralFieldset(),
         ]);
-
-        // Module::display() only resolves templates under views/templates/{hook,front}/
-        // (or the module root) - it never looks in views/templates/admin/, which is why
-        // it reported "No template found for module" for the BO configuration page.
-        // Admin templates must be fetched directly instead.
-        return $this->context->smarty->fetch($this->local_path . 'views/templates/admin/configure.tpl');
     }
 }

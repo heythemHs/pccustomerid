@@ -1,9 +1,12 @@
 # pccustomerid — PC Customer ID for customers adress
 
-PrestaShop 8.2 module for the Seedstockers multistore installation. Adds a
-conditional `dni` field (ID number / DNI or equivalent) to customer address
-forms, required only when the shipping destination is Switzerland or the
-Canary Islands (Spain).
+Generic PrestaShop 8.2 module, multistore/multilanguage. Adds a conditional
+`dni` field (ID number / DNI or equivalent) to customer address forms,
+required only for addresses in an admin-configurable set of countries, with
+a built-in extra rule for the Canary Islands (Spain). It is not tied to any
+particular store: which countries/provinces trigger the field and which
+shops the module is active on are both configured from the BO, with no
+values hardcoded in code.
 
 ## What it does
 
@@ -11,8 +14,8 @@ Canary Islands (Spain).
   - `additionalCustomerAddressFields` — declares the `dni` field (hidden and
     optional by default; visibility/required state is driven by JS).
   - `actionValidateCustomerAddressForm` — the actual server-side enforcement:
-    rejects the address form if the destination is Switzerland or the Canary
-    Islands and `dni` is empty, too long, or contains disallowed characters.
+    rejects the address form if the destination requires the ID and `dni` is
+    empty, too long, or contains disallowed characters.
   - `displayAdditionalCustomerAddressFields` — shows the saved ID number on
     the "my addresses" cards.
   - `actionFrontControllerSetMedia` — loads `front.css` / `front.js` only on
@@ -23,8 +26,8 @@ Canary Islands (Spain).
   `Address::$dni` — verified against PrestaShop 8.2 core source, no custom
   table, no `actionObjectAddressAddAfter` fallback needed).
 - Does **not** enable PrestaShop's global "identification number required"
-  country setting for CH or ES — the Canary-only / Switzerland-only rule is
-  entirely this module's own logic (`Pccustomerid::requiresCustomerId()`).
+  country setting — which countries/regions require the ID is entirely this
+  module's own, admin-configurable logic (`Pccustomerid::requiresCustomerId()`).
 
 ## Why the field is never marked "required" at the FormField level
 
@@ -49,27 +52,51 @@ when `Address::save()` runs its own native check.
 
 ## Configuration (Admin > Modules > PC Customer ID for customers adress)
 
-All settings are read through `Configuration::get($key)` with no explicit
-`id_shop`, so they resolve via PrestaShop's normal multistore cascade
-(shop → shop group → all shops) for the shop context the visitor is
-currently on. The BO configuration page respects whichever shop context
-(`All shops` / `Shop group` / `Single shop`) is selected in the top page
-selector when you hit Save.
+The BO page is built with the standard `HelperForm` (same widgets/markup as
+any other native PrestaShop module settings page — no hand-rolled HTML):
 
-| Key | Default | Notes |
+- **Shops** — a shop-association tree (`HelperTreeShops`, the exact same
+  checkbox component PrestaShop uses elsewhere for per-shop association,
+  e.g. products/carriers). Check a shop to make the module active there;
+  uncheck it to fully disable the module for that shop. There is no
+  separate "excluded shops" text field — this tree is the only on/off
+  switch, and it lists every shop regardless of which BO shop-context
+  selector is active, exactly like other native shop-association screens.
+- **Countries** — a real multi-select (`Country::getCountries()`) of every
+  active country in the shop. Any country picked here always requires the
+  ID number, for any store using this module — nothing is hardcoded to
+  Switzerland or any other country.
+- **Canary Islands provinces (Spain)** — a multi-select of Spain's actual
+  provinces (`State::getStatesByIdCountry()`), not a manually-typed list of
+  state IDs. Spain itself is resolved on the fly via `Country::getByIso('ES')`,
+  so there is no "Spain country ID" field to fill in either. This is kept as
+  a dedicated rule (in addition to the generic country list above) because
+  it targets part of a country, not the whole of Spain.
+- **Postcode fallback (regex)** — used only when the province above can't be
+  matched (e.g. state data not imported yet); defaults to `^(35|38)\d{3}$`.
+- **Run auto-detection** button — re-detects the Canary provinces from
+  `ps_state` (`name` LIKE `%Canar%`/`%Palmas%`/`%Tenerife%` for ISO `ES`);
+  useful after a fresh localization import on a new environment.
+
+All settings are stored as simple global `Configuration` values (not scoped
+per shop-context) since the shop tree is itself the per-shop mechanism —
+this matches how PrestaShop's own shop-association settings work and avoids
+mixing two different multistore models on one page.
+
+| Key | Stores | Default |
 |---|---|---|
-| `PCCUSTOMERID_ENABLED` | `1` (`0` on the auto-detected USA shop) | Master on/off for the current shop context. |
-| `PCCUSTOMERID_EXCLUDED_SHOP_IDS` | auto-filled with the shop ID(s) whose domain contains `seedstockersusa.com` | Belt-and-suspenders exclusion list, independent of the per-shop toggle above. |
-| `PCCUSTOMERID_CH_COUNTRY_ID` | auto-detected via ISO `CH` | |
-| `PCCUSTOMERID_ES_COUNTRY_ID` | auto-detected via ISO `ES` | |
-| `PCCUSTOMERID_CANARY_STATE_IDS` | auto-detected (`ps_state.name` LIKE `%Canar%`/`%Palmas%`/`%Tenerife%` for ES) | Editable CSV; re-run detection any time with the "Run auto-detection" button. |
-| `PCCUSTOMERID_CANARY_POSTCODE_REGEX` | `^(35|38)\d{3}$` | Fallback used when the state can't be matched. |
-| `PCCUSTOMERID_USE_DNI_FIELD` | `1` | Informational only in this version — the module always uses the native `dni` column. |
+| `PCCUSTOMERID_ENABLED_SHOP_IDS` | CSV of `id_shop` where the module is active | every shop except one whose domain contains `seedstockersusa.com` (detected at install; edit the tree to change) |
+| `PCCUSTOMERID_COUNTRIES` | CSV of `id_country` that always require the ID | Switzerland only |
+| `PCCUSTOMERID_CANARY_STATE_IDS` | CSV of `id_state` (Spain provinces) | auto-detected Canary provinces |
+| `PCCUSTOMERID_CANARY_POSTCODE_REGEX` | regex string | `^(35|38)\d{3}$` |
+| `PCCUSTOMERID_USE_DNI_FIELD` | `1`/`0` | `1` (informational — see below) |
 
 Because staging and production have different database IDs, install this
 module on each environment separately (or re-run "Run auto-detection" after
 copying a database) rather than copying configuration values across
-environments.
+environments — the multi-select/tree UI is precisely what makes that safe:
+you pick countries/shops by name, not by typing an ID that may differ
+between environments.
 
 ## Installation
 
@@ -77,8 +104,10 @@ environments.
 2. Admin > Modules > install "PC Customer ID for customers adress".
 3. Clear the cache (Admin > Advanced Parameters > Performance, or delete
    `var/cache/*`).
-4. Open the module's configuration and confirm the auto-detected country /
-   Canary state IDs, and that the USA shop is excluded.
+4. Open the module's configuration and confirm: the shop tree matches which
+   shops should have the field, the countries multi-select has the right
+   countries checked (Switzerland by default), and the Canary provinces
+   multi-select looks correct for your `ps_state` data.
 
 Uninstalling removes the module's configuration keys only; any `dni` value
 already saved on customer addresses is left untouched.
@@ -115,8 +144,8 @@ Covers the acceptance criteria in the cahier des charges section 13/14:
 5. Switch language/shop to `es` and confirm the Spanish help text under the
    field; any other shop/language shows the English text.
 6. Confirm the module is inactive by default on the shop whose domain is
-   `seedstockersusa.com`, and that toggling `PCCUSTOMERID_ENABLED` in that
-   shop's own context re-enables it without affecting other shops.
+   `seedstockersusa.com` (unchecked in the shop tree), and that checking it
+   in the BO re-enables the module there without affecting other shops.
 7. Install/uninstall/reinstall without errors; verify hooks are registered
    (Advanced Parameters > Hooks, filter by module) and no core/theme file
    was modified.
