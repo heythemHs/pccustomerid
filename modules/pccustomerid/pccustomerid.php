@@ -33,13 +33,6 @@ class Pccustomerid extends Module
      */
     const DNI_VALUE_REGEX = '/^[0-9A-Za-z\-.]{1,16}$/';
 
-    /**
-     * Used as the HelperTreeShops "table" attribute (checkbox name prefix) and as
-     * $helper->table below. This module has no dedicated database table; the value only
-     * namespaces form field names, matching the convention used by other modules' BO forms.
-     */
-    public $table = 'pccustomerid';
-
     public function __construct()
     {
         $this->name = 'pccustomerid';
@@ -624,7 +617,10 @@ class Pccustomerid extends Module
         $helper = new HelperForm();
 
         $helper->show_toolbar = false;
-        $helper->table = $this->table;
+        // Purely a label for this form (form id, HelperTreeShops checkbox-name prefix):
+        // it must NOT be $this->table, which is ModuleCore's own bookkeeping property
+        // pointing at the ps_module table (overriding it broke module installation).
+        $helper->table = $this->name;
         $helper->module = $this;
         $helper->default_form_language = $this->context->language->id;
         $helper->allow_employee_form_lang = (int) Configuration::get('PS_BO_ALLOW_EMPLOYEE_FORM_LANG', 0);
